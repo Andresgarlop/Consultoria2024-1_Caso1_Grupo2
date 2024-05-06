@@ -1,0 +1,916 @@
+---
+title: "Consultoria 1"
+author: "Maria Isabel Jaimes Arias"
+date: "2024-03-08"
+output:
+  tufte::tufte_html:
+    toc: yes
+  tufte::tufte_handout:
+    citation_package: natbib
+    latex_engine: xelatex
+  tufte::tufte_book:
+    citation_package: natbib
+    latex_engine: xelatex
+link-citations: yes
+---
+### Instalación de paquetes
+```{r}
+## Instalas los paquetes necesarios para utilizar en el resto del análisis, este chunck solo se debe correr una vez.
+#install.packages("readxl")
+#install.packages("dplyr")
+#install.packages("nortest")
+#install.packages("lmtest")
+#install.packages("ggplot2")
+#install.packages("DT")
+#install.packages("ez")
+#install.packages("ggeffects")
+#install.packages("gridExtra")
+#install.packages("lme4")
+#install.packages("lmerTest")
+#install.packages("emmeans")
+#install.packages("labelled")
+#install.packages("rstatix")
+#install.packages("ggpubr")
+#install.packages("GGally")
+#install.packages("Epi")
+#install.packages("multcomp")
+#install.packages("geepack")
+#install.packages("gt")
+#install.packages("tidyverse")
+```
+
+### Librerías
+
+```{r}
+library(readxl)
+library(dplyr)
+library(nortest)
+library(lmtest)
+library(DescTools)
+library(ggplot2)
+library(writexl)
+library(DT)
+library(ez)
+library(nlme)
+library(gridExtra)
+library(lmerTest)
+library(emmeans)
+
+#### Librerias Longitudinal 
+library(labelled)   # labeling data
+library(rstatix)    # summary statistics
+library(ggpubr)     # convenient summary statistics and plots
+library(GGally)     # advanced plot
+library(car)        # useful for anova/wald test
+library(Epi)        # easy getting CI for model coef/pred
+library(lme4)       # linear mixed-effects models
+library(lmerTest)   # test for linear mixed-effects models
+library(emmeans)    # marginal means
+library(multcomp)   # CI for linear combinations of model coef
+library(geepack)    # generalized estimating equations
+library(ggeffects)  # marginal effects, adjusted predictions
+library(gt)         # nice tables
+
+library(tidyverse)  # for everything (data manipulation, visualization, coding, and more)
+theme_set(theme_minimal() + theme(legend.position = "bottom")) # theme for ggplot
+
+
+```
+
+### Datos 
+```{r}
+## En este chunck se debe colocar la dirección de la carpeta en la cual se encuentran los datos, tener cuidado con
+datos <- read_excel("C:/Users/andre/OneDrive/Escritorio/Andrés 2024/2024-1/Consultoría/Caso 1/Info original/MATRIZ DE DATOS FINAL.xlsx", sheet = "Dia 120",col_names=T,range=cell_cols("A:L"))
+str(datos)
+```
+
+#### Imputación de datos
+Los datos fueron imputados utilizando el promedio de los mismos, teniendo en cuenta que no se tenían demasiados datos faltantes.
+```{r}
+datos<-datos[,-5] ## Cambio necesario para no tener que corregir todo el código (unicamente se corre una sola vez para que no reconozca la columna de las replicas)
+promedios <- datos %>%
+  group_by(`Tratamientos (dia 120)`) %>%
+  summarise(Altura = mean(`Altura de la planta (cm)`), 
+            Tallo = mean(`diametro de tallo (mm)`),
+            Hojas= mean(`numero de hojas`),
+            Cuello=mean(`diametro del cuello de la raiz (mm)`),
+            raiz=mean(`Longitud de la raiz ( cm)`),
+            area=mean(`Area foliar (cm2)`),
+            biomasa=mean(`Biomasa seca total (g)`))
+## La anterior linea agrupa por tratamientos y obtiene el promedio en cada una de las variables elegidas.
+dato10<-data.frame("C1b","50% P","sin HFMA",promedios[2,])
+names(dato10)<-names(datos)
+dato15<-data.frame("Sin consorcio","50% P","con HFMA",promedios[7,])
+names(dato15)<-names(datos)
+dato17<-data.frame("Sin consorcio","100% P","con HFMA",promedios[9,])
+names(dato17)<-names(datos)
+
+datos<-rbind(datos[1:49,],dato10,datos[50:73,],dato15,datos[74:82,],dato17,datos[83:87,])
+#Las anteriores lineas crean la tabla de datos con cada uno de los tratamientos y los datos completos.
+# Convertir a factores 
+datos$`Factor 1` <- as.factor(datos$`Factor 1`)
+datos
+datos$`Factor 2` <- factor(datos$`Factor 2`,levels=c("0% P","50% P","100% P"))
+datos$`Factor 3` <- as.factor(datos$`Factor 3`)
+```
+
+### Modelo para la variable: Altura de la planta (cm)
+
+```{r}
+## Creando el modelo lineal para la variable altura
+mod_alt<-lm(`Altura de la planta (cm)`~`Factor 1`*`Factor 2`*`Factor 3`,data=datos)
+```
+
+
+#### Supuestos
+```{r}
+residuos <- resid(mod_alt)
+
+## Prueba de normalidad para los residuos
+qqnorm(residuos) 
+qqline(residuos)
+lillie.test(residuos) # No se rechaza normalidad al 5% (p-value=0.0525)
+shapiro.test(residuos) # No se rechaza normalidad al 5% (pvalue=0.2348)
+
+# Test de homocedasticidad
+grupos<-as.factor(rep(seq(1:18),each=5))
+bartlett.test(residuos,grupos,data=datos) # No se rechaza igualdad de varianzas al 5% de significancia (p-value=0.1166)
+
+# Test de autocorrelación de errores
+dwtest(mod_alt,alternative="two.sided") # No hay autocorrelación al 5% de significancia (p-value=0.9606)
+```
+
+#### ANOVA Primer modelo
+
+```{r}
+anova(mod_alt) # Interacción triple y Factor 2 con Factor 3 no significativa
+```
+
+#### Modelo depurado
+
+```{r}
+#Modelo depurando aquellas interacciones que no fueron significativas en el anova anterior.
+mod2_alt<-lm(`Altura de la planta (cm)`~`Factor 1`+`Factor 2`+`Factor 3`+
+           `Factor 1`*`Factor 2`+`Factor 1`*`Factor 3`,data=datos)
+```
+
+```{r}
+#Revisando significancia de los Factores y de las combinaciones entre ellos
+anova(mod2_alt)
+```
+
+#### Supuestos
+
+```{r}
+residuos2 <- resid(mod2_alt)
+
+## Prueba de normalidad para los residuos
+qqnorm(residuos2) 
+qqline(residuos2)
+lillie.test(residuos2) # No se rechaza normalidad al 5% (p-value=0.3077)
+shapiro.test(residuos2) # No se rechaza normalidad al 5% (p-value=0.1942)
+
+# Test de homocedasticidad
+grupos<-as.factor(rep(seq(1:18),each=5))
+bartlett.test(residuos2,grupos,data=datos) # No se rechaza a  un nivel de significancia del 5% (p-value=0.1166)
+
+# Test de autocorrelación de errores
+dwtest(mod2_alt,alternative="two.sided") # No hay autocorrelación a un nivel de significancia del 5% (p-value=0.7761)
+
+```
+
+
+```{r}
+anova(mod2_alt) # Todo significativo 
+```
+
+
+### Modelo para la variable: diametro de tallo (mm)
+
+```{r}
+mod_tal<-lm(`diametro de tallo (mm)`~`Factor 1`*`Factor 2`*`Factor 3`,data=datos)
+```
+
+#### Supuestos
+```{r}
+residuos_t <- resid(mod_tal)
+
+## Prueba de normalidad para los residuos
+qqnorm(residuos_t) 
+qqline(residuos_t)
+lillie.test(residuos_t) # No se rechaza normalidad al 5% (p-value=0.8657)
+shapiro.test(residuos_t) # No se rechaza normalidad al 5% (p-value=0.3238)
+
+# Test de homocedasticidad
+grupos<-as.factor(rep(seq(1:18),each=5))
+bartlett.test(residuos_t,grupos,data=datos) # No se rechaza (p-value=0.06087)
+
+# Test de autocorrelación de errores
+dwtest(mod_tal,alternative="two.sided") # No hay autocorrelación (p-value=0.206)
+```
+
+
+
+```{r}
+anova(mod_tal)
+```
+
+#### Modelo depurado
+
+```{r}
+mod2_tal<-lm(`diametro de tallo (mm)`~`Factor 1`+`Factor 2`,data=datos)
+```
+
+
+#### Supuestos
+
+```{r}
+residuos2_t <- resid(mod2_tal)
+
+## Prueba de normalidad para los residuos
+qqnorm(residuos2_t) 
+qqline(residuos2_t)
+lillie.test(residuos2_t) # No se rechaza normalidad al 5% (p-value=0.05119)
+shapiro.test(residuos2_t) # No se rechaza normalidad al 5% (p-value=0.0678)
+
+# Test de homocedasticidad
+grupos<-as.factor(rep(seq(1:18),each=5))
+bartlett.test(residuos2_t,grupos,data=datos) # No se rechaza (p-value=0.06087)
+
+# Test de autocorrelación de errores
+dwtest(mod2_tal,alternative="two.sided") # No hay autocorrelación (p-value=0.4975)
+
+```
+
+```{r}
+anova(mod2_tal) # Sólo son significativos los factores 1 y 2
+```
+
+### Modelo para la variable: numero de hojas
+
+
+```{r}
+mod_hoj<-lm(`numero de hojas`~`Factor 1`*`Factor 2`*`Factor 3`,data=datos)
+```
+
+#### Supuestos
+```{r}
+residuos_h <- resid(mod_hoj)
+
+## Prueba de normalidad para los residuos
+qqnorm(residuos_h) 
+qqline(residuos_h)
+lillie.test(residuos_h) # No se rechaza normalidad al 5% (p-value=0.07605)
+shapiro.test(residuos_h) # No se rechaza normalidad al 5% (p-value=0.4685)
+
+# Test de homocedasticidad
+grupos<-as.factor(rep(seq(1:18),each=5))
+bartlett.test(residuos_h,grupos,data=datos) # No se rechaza (p-value=0.09948)
+
+# Test de autocorrelación de errores
+dwtest(mod_hoj,alternative="two.sided") # No hay autocorrelación (p-value=0.8641)
+```
+
+
+```{r}
+anova(mod_hoj) # Se deja todo puesto que la interacción triple es significativa
+```
+
+### Modelo para la variable: diametro del cuello de la raiz (mm)
+
+
+```{r}
+mod_raiz<-lm(`diametro del cuello de la raiz (mm)`~`Factor 1`*`Factor 2`*`Factor 3`,data=datos)
+```
+
+#### Supuestos
+```{r}
+residuos_r <- resid(mod_raiz)
+
+## Prueba de normalidad para los residuos
+qqnorm(residuos_r) 
+qqline(residuos_r)
+lillie.test(residuos_r) # No se rechaza normalidad al 5% (p-value=0.6056)
+shapiro.test(residuos_r) # No se rechaza normalidad al 5% (p-value=0.4114)
+
+# Test de homocedasticidad
+grupos<-as.factor(rep(seq(1:18),each=5))
+bartlett.test(residuos_r,grupos,data=datos) # No se rechaza (p-value=0.1348)
+
+# Test de autocorrelación de errores
+dwtest(mod_raiz,alternative="two.sided") # No hay autocorrelación (p-value=0.8727)
+```
+
+```{r}
+anova(mod_raiz) 
+```
+
+## Modelo depurado
+
+```{r}
+mod2_raiz<-lm(`diametro del cuello de la raiz (mm)`~`Factor 2`,data=datos)
+```
+
+
+```{r}
+residuos2_r <- resid(mod2_raiz)
+
+## Prueba de normalidad para los residuos
+qqnorm(residuos2_r) 
+qqline(residuos2_r)
+lillie.test(residuos2_r) # No se rechaza normalidad al 5% (p-value=0.4259)
+shapiro.test(residuos2_r) # No se rechaza normalidad al 5% (p-value=0.3126)
+
+# Test de homocedasticidad
+grupos<-as.factor(rep(seq(1:18),each=5))
+bartlett.test(residuos2_r,grupos,data=datos) # No se rechaza (p-value=0.1348)
+
+# Test de autocorrelación de errores
+dwtest(mod2_raiz,alternative="two.sided") # No hay autocorrelación (p-value=0.3181)
+```
+```{r}
+anova(mod2_raiz)
+```
+### Pruebas múltiples 
+Los anteriores análisis nos indican la existencia de diferencias significativas entre los tratamientos, pero no nos indica cuáles tienen diferencias significativas, por lo tanto se busca con el siguiente código comparar los tratamientos 2 a 2 en búsqueda de estas diferencias realizando una corrección por pruebas múltiples utilizando Bonferroni.
+
+LSD: no aplica correcciones por pruebas múltiples por lo tanto no es el método más apto en este caso.
+
+Bonferroni: si aplica corrección por pruebas múltiples, pero puede ser muy conservador.
+
+HSD: Es recomendado cuando se comparan bastantes grupos, realiza correción por pruebas múltiples y funciona cuando no se tienen datos no pareados.
+
+
+```{r}
+## Se utiliza el módelo ANOVA depurado, pero para que la función postHocTest funcione hay que colocarle un nombre más "simple", por eso se realiza el cambio de nombre de las varibles.
+##Renombrando los factores
+datos2<-datos
+colnames(datos2)<-c("A","B","C","D","Altura","Diam_Tallo","N_Hojas","Diam_Raiz")
+
+#Convenciones.
+#A:Factor1
+#B:Factor2
+#C:Factor3
+#D:Tratamiento día 120
+```
+
+Se crea una función para filtrar los resultados con p-valor menor a 0.05.
+```{r}
+filtrar_p_valor <- function(resultados) {
+  for (grupo in seq_along(resultados)) {
+    nombre_grupo <- names(resultados)[grupo]
+    cat("Grupo:", nombre_grupo, "\n")
+    
+    if (is.data.frame(resultados[[grupo]])) {
+      resultados[[grupo]] <- resultados[[grupo]][resultados[[grupo]]$pval < 0.05, ]
+    } else if (is.matrix(resultados[[grupo]])) {
+      # Si es una matriz, intenta convertirla a dataframe y luego filtra
+      resultados[[grupo]] <- as.data.frame(resultados[[grupo]])
+      resultados[[grupo]] <- resultados[[grupo]][resultados[[grupo]]$pval < 0.05, ]
+    } else {
+      # Si es otro tipo de objeto, emite una advertencia
+      warning(paste("El grupo", nombre_grupo, "no es un dataframe o matriz."))
+    }
+  }
+  return(resultados)
+}
+
+```
+
+
+
+#### Altura de la planta.
+```{r}
+mod_alt_comp <- aov(Altura~A+B+C+A*B+A*C,data=datos2)
+#PostHocTest(mod_alt_comp, method = "bonferroni")
+HSD1<-PostHocTest(mod_alt_comp, method = "hsd")
+#PostHocTest(mod_alt_comp, method = "lsd")
+```
+
+```{r}
+# Llamar a la función con la lista de resultados HSD1
+HSD1_filtrado <- filtrar_p_valor(HSD1)
+
+# Mostrar los resultados filtrados
+print(HSD1_filtrado)
+```
+
+Interpretación:
+
+- El valor medio de la altura de la planta varía considerando únicamente los niveles de fertilización. Se tiene que es mayor cuando el nivel de fertilización es de $100\%$.
+
+
+```{r}
+interaction.plot(datos$`Factor 2`,as.factor(rep("Hola",length(datos$`Factor 2`))),  datos$`Altura de la planta (cm)`, main=" Fertilizante",xlab="Nivel de Fertilizante",ylab ="Promedio altura de la planta",col=c("red","blue","orange"),trace.label = "Consorcio",legend=F)
+```
+
+- El valor medio de la altura de la planta varía considerando únicamente la inoculación con HFMA es mayor que sin considerar esta inoculación.
+
+```{r}
+interaction.plot(datos$`Factor 3`,as.factor(rep("Hola",length(datos$`Factor 2`))),  datos$`Altura de la planta (cm)`, main="HFMA",xlab="HFMA",ylab ="Promedio altura de la planta",col=c("red","blue","orange"),trace.label = "Consorcio",legend=F)
+```
+
+- Considerando las interacciones entre los consorcios y los niveles de fertilización, se encuentra que la interacción entre el consorcio C1a y el nivel de fertilización de $100\%$, genera un promedio de altura de la planta mayor. Aquí no se tiene en cuenta el efecto de la inoculación.  
+
+```{r}
+interaction.plot(datos$`Factor 1`,datos$`Factor 2`,  datos$`Altura de la planta (cm)`, main="Consorcio Vs Fertilizante",xlab="Consorcio",ylab ="Promedio altura de la planta",col=c("red","blue","orange"),trace.label = "Fertilizante")
+```
+
+- Se observa que para el caso en que se considera la interacción entre los consorcios y la inoculación con HFMA, se obtiene un mayor valor del promedio de la altura con el consorcio C1a y sin inoculación con HFMA. Sin embargo, en las comparaciones múltiples se tiene que no es significativa la diferencia entre considerar el consorcio C1a con o sin HFMA, y tampoco entre el promedio de la altura cuando se tiene el consorcio C1a sin HFMA y C1b con HFMA. Tener presenta que en este análisis no se considera el efecto del fertilizante. 
+
+```{r}
+interaction.plot(datos$`Factor 1`,datos$`Factor 3`,  datos$`Altura de la planta (cm)`, main="Consorcio Vs HFMA",xlab="Consorcio",ylab ="Promedio altura de la planta",col=c("red","blue","orange"),trace.label = "HFMA")
+```
+No se hace análisis interactuando los 3 factores, puesto que no se consideró significativa la interacción triple. 
+
+
+#### Diametro de tallo
+```{r}
+mod_alt_comp <- aov(Diam_Tallo~A+B,data=datos2)
+#PostHocTest(mod_alt_comp, method = "bonferroni")
+HSD2<-PostHocTest(mod_alt_comp, method = "hsd")
+#PostHocTest(mod_alt_comp, method = "lsd")
+```
+
+
+```{r}
+# Llamar a la función con la lista de resultados HSD2
+HSD2_filtrado <- filtrar_p_valor(HSD2)
+
+# Mostrar los resultados filtrados
+print(HSD2_filtrado)
+```
+
+- Considerando únicamente el consorcio, se tiene que el consorcio C1a presenta un mayor valor promedio del diámetro del tallo, aunque esta diferencia no es significativa con la del consorcio C1b.
+
+- Considerando únicamente el nivel de fertilización, se tiene que el promedio del diámetro del tallo es mayor para un $100\% P$.
+
+```{r}
+### Diametro del tallo
+## Factores simples (solo los significativos)
+par(mfrow = c(1, 2))
+interaction.plot(datos$`Factor 1`,as.factor(rep("Hola",length(datos$`Factor 2`))),  datos$`diametro de tallo (mm)`, main="Consorcio ",xlab="Consorcio",ylab ="Promedio diametro de tallo",col=c("red","blue","orange"),trace.label = "Consorcio",legend=F)
+
+interaction.plot(datos$`Factor 2`,as.factor(rep("Hola",length(datos$`Factor 2`))),  datos$`diametro de tallo (mm)`, main=" Fertilizante",xlab="Nivel de Fertilizante",ylab ="Promedio diametro de tallo",col=c("red","blue","orange"),trace.label = "Consorcio",legend=F)
+```
+
+
+
+
+#### Número de hojas
+```{r}
+mod_alt_comp <- aov(N_Hojas~A*B*C,data=datos2)
+#PostHocTest(mod_alt_comp, method = "bonferroni")
+HSD3<-PostHocTest(mod_alt_comp, method = "hsd")
+#PostHocTest(mod_alt_comp, method = "lsd")
+```
+
+```{r}
+# Llamar a la función con la lista de resultados HSD3
+HSD3_filtrado <- filtrar_p_valor(HSD3)
+
+# Mostrar los resultados filtrados
+print(HSD3_filtrado)
+```
+
+```{r}
+### Número de hojas
+## Factores simples (solo los significativos)
+par(mfrow = c(1, 3))
+interaction.plot(datos$`Factor 1`,as.factor(rep("Hola",length(datos$`Factor 2`))),  datos$`numero de hojas`, main="Consorcio ",xlab="Consorcio",ylab ="Promedio número de hojas",col=c("red","blue","orange"),trace.label = "Consorcio",legend=F)
+
+interaction.plot(datos$`Factor 2`,as.factor(rep("Hola",length(datos$`Factor 2`))),  datos$`numero de hojas`, main=" Fertilizante",xlab="Nivel de Fertilizante",ylab ="Promedio número de hojas",col=c("red","blue","orange"),trace.label = "Consorcio",legend=F)
+
+interaction.plot(datos$`Factor 3`,as.factor(rep("Hola",length(datos$`Factor 2`))),  datos$`numero de hojas`, main="HFMA",xlab="HFMA",ylab ="Promedio número de hojas",col=c("red","blue","orange"),trace.label = "Consorcio",legend=F)
+```
+```{r}
+## Factores dobles (solo los significativos)
+par(mfrow = c(1, 3))
+interaction.plot(datos$`Factor 1`,datos$`Factor 2`,  datos$`numero de hojas`, main="Consorcio Vs Fertilizante",xlab="Consorcio",ylab ="Promedio número de hojas",col=c("red","blue","orange"),trace.label = "Fertilizante")
+
+interaction.plot(datos$`Factor 2`,datos$`Factor 3`,  datos$`numero de hojas`, main="Consorcio Vs HFMA",xlab="Consorcio",ylab ="Promedio número de hojas",col=c("red","blue","orange"),trace.label = "HFMA")
+
+interaction.plot(datos$`Factor 1`,datos$`Factor 3`,  datos$`numero de hojas`, main="Consorcio Vs HFMA",xlab="Consorcio",ylab ="Promedio número de hojas",col=c("red","blue","orange"),trace.label = "HFMA")
+```
+
+```{r}
+## Espacio reservado por si nos dan ganas de hacer la triple aun no lo se
+#https://cran.r-project.org/web/packages/sjPlot/vignettes/plot_interactions.html
+```
+
+
+
+#### Diametro del cuello de la raíz 
+```{r}
+mod_alt_comp <- aov(Diam_Raiz~B,data=datos2)
+#PostHocTest(mod_alt_comp, method = "bonferroni")
+HSD4<-PostHocTest(mod_alt_comp, method = "hsd")
+#PostHocTest(mod_alt_comp, method = "lsd")
+HSD4
+```
+
+- Considerando únicamente el nivel de fertilización, se tiene que el nivel del $50\%$ presenta un mayor valor promedio del diámetro del cuello de la raíz, aunque esta diferencia no es significativa con la del nivel del $100\%$.
+
+
+```{r}
+### Diametro cuello de la raíz
+## Factores simples (solo los significativos)
+par(mfrow = c(1, 1))
+interaction.plot(datos$`Factor 2`,as.factor(rep("Hola",length(datos$`Factor 2`))),  datos$`numero de hojas`, main="Fertilizante ",xlab="Nivel de fertilizante",ylab ="Promedio diametro cuello de la raíz",col=c("red","blue","orange"),trace.label = "Consorcio",legend=F)
+```
+
+## Variables destructivo
+
+
+### Modelo para la variable: área foliar
+```{r}
+## Creando el modelo lineal para la variable área foliar
+mod_area<-glm(`Area foliar (cm2)`~`Factor 1`+`Factor 2`+`Factor 3`+`Factor 1`*`Factor 2`+`Factor 1`*`Factor 3`,data=datos,family=Gamma(log))
+AIC(mod_area)
+#residuals2(mod_area,type="quantile")
+#envelope(mod_area, type="quantile", rep=500)
+```
+
+
+#### Supuestos
+```{r}
+residuos_ar <- residuals2(mod_area,type="quantile")
+```
+```{r}
+summary(mod_area)
+#anova(mod_area)
+```
+```{r}
+envelope(mod_area,rep=500,conf=0.99)
+```
+
+```{r}
+cdi <- cooks.distance(mod_area)
+plot(cdi, type="h", xlab="Observation Index", ylab="Cook’s Distance")
+```
+
+```{r}
+infl <- c(4, 12,13,27, 31, 32,57, 59,62)
+n <- length(infl)
+metr <- chol2inv(chol(vcov(mod_area)))
+hm <- 2**n - 1
+results <- matrix(0, nrow=hm, ncol=1)
+id <- 1; nfil <- vector()
+for(i in 1:n){
+  pos <- combn(n,i)
+  for(j in 1:ncol(pos)){
+    fitemp <- update(mod_area, subset=-pos[,j])
+    difs <- coef(fitemp)-coef(mod_area)
+    results[id,1] <- t(difs)%*%metr%*%(difs)
+    nfil <- c(nfil,paste(infl[pos[,j]], collapse=","))
+    id <- id + 1 
+    }
+  }
+nfil[results==max(results)]
+```
+```{r}
+mod_area2<-update(mod_area, subset=-c(4, 12,13,27, 31, 32,57, 59,62))
+summary(mod_area2)
+```
+
+```{r}
+envelope(mod_area2,rep=500,conf=0.99)
+residuos_ar2 <- residuals2(mod_area2,type="quantile")
+```
+
+
+
+### Modelo para la variable: biomasa seca total
+```{r}
+## Creando el modelo lineal para la variable área foliar
+mod_biom<-glm(`Biomasa seca total (g)`~`Factor 1`+`Factor 2`+`Factor 3`+`Factor 1`*`Factor 2`,data=datos,family=Gamma(log))
+AIC(mod_biom)
+```
+
+
+#### Supuestos
+```{r}
+residuos_bio <- residuals2(mod_biom,type="quantile")
+```
+
+
+```{r}
+envelope(mod_biom)
+```
+
+```{r}
+summary(mod_biom)
+#anova(mod_biom)
+```
+
+```{r}
+cdi2 <- cooks.distance(mod_biom)
+plot(cdi2, type="h", xlab="Observation Index", ylab="Cook’s Distance")
+```
+
+
+
+## Análisis longitudinal.
+### Altura de la planta. 
+```{r}
+## Carga de la base de datos 
+datos_long <- read_excel("C:/Users/andre/OneDrive/Escritorio/Andrés 2024/2024-1/Consultoría/Caso 1/Info original/Tabla_Longitudinal_V1_AG.xlsx",col_names=T)
+datos_long$ID<-as.factor(datos_long$ID)
+datos_long$Altura<-as.numeric(datos_long$Altura)
+
+datos_long$Tiempo<-as.character(datos_long$Tiempo)
+datos_long$DiamTallo<-as.numeric(datos_long$DiamTallo)
+datos_long$NumHojas<-as.numeric(datos_long$NumHojas)
+datos_long$DiamRaiz<-as.numeric(datos_long$DiamRaiz)
+## Reorganizando los datos 
+#datos_long <- datos_long[order(datos_long$ID, datos_long$Tiempo),]
+#View(datos_long)
+#Para observar la anterior tabla de una forma más sencilla 
+DT::datatable(datos_long)
+```
+
+####Exploración de los datos.
+```{r}
+gg <- ggplot(data = datos_long, aes(x = Tiempo, y = DiamRaiz, group = ID))
+gg + geom_line(col="grey") + stat_summary(aes(group = 1),
+    geom = "line", fun = mean, size=2)
+```
+El anterior gráfico está graficando las 90 plantas (individuos) cuya altura fueron medida a traves del tiempo (para cada una de los 7 tiempos), Las lineas en color gris claro representan cada indivudo y la linea de color negro representa el promedio. Es posible observar que la gráfica parece indicar que el efecto del tiempo no es lineal y además se observa algo de variabilidad entre los individuos. 
+
+```{r}
+ggplot(datos_long, aes(Tiempo, DiamRaiz, fill = Tiempo)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2) +
+  guides(fill = "none") +
+  labs(x = "", y = "Diametro de raíz")
+```
+```{r}
+ggplot(datos_long[c(1:35,352:420),], aes(Tratamiento, DiamRaiz, fill = Tiempo)) +
+  geom_boxplot() +
+  labs(x = "", y = "Diametro de raíz", fill = "")
+
+ggplot(datos_long[422:525,], aes(Tratamiento, DiamRaiz, fill = Tiempo)) +
+  geom_boxplot() +
+  labs(x = "", y = "Diametro de raíz", fill = "")
+
+ggplot(datos_long[527:630,], aes(Tratamiento, DiamRaiz, fill = Tiempo)) +
+  geom_boxplot() +
+  labs(x = "", y = "Diametro de raíz", fill = "")
+
+ggplot(datos_long[37:140,], aes(Tratamiento, DiamRaiz, fill = Tiempo)) +
+  geom_boxplot() +
+  labs(x = "", y = "Diametro de raíz", fill = "")
+
+ggplot(datos_long[142:245,], aes(Tratamiento, DiamRaiz, fill = Tiempo)) +
+  geom_boxplot() +
+  labs(x = "", y = "Diametro de raíz", fill = "")
+
+ggplot(datos_long[247:350,], aes(Tratamiento, DiamRaiz, fill = Tiempo)) +
+  geom_boxplot() +
+  labs(x = "", y = "Diametro de raíz", fill = "")
+```
+```{r}
+group_by(datos_long[c(1:35,352:420),], Tratamiento, Tiempo) %>% 
+  summarise(mean_Alt = mean(DiamRaiz), .groups = "drop") %>% 
+  ggplot(aes(Tratamiento, mean_Alt, fill = Tiempo, label = round(mean_Alt,2))) +
+  geom_col(position = "dodge") +
+  geom_text(position = position_dodge(width = 0.9), vjust = -0.5) +
+  coord_flip() +
+  labs(x = "", y = "Diametro de raíz", fill = "")
+
+#######################
+
+group_by(datos_long[422:525,], Tratamiento, Tiempo) %>% 
+  summarise(mean_Alt = mean(DiamRaiz), .groups = "drop") %>% 
+  ggplot(aes(Tratamiento, mean_Alt, fill = Tiempo, label = round(mean_Alt,2))) +
+  geom_col(position = "dodge") +
+  geom_text(position = position_dodge(width = 0.9), vjust = -0.5) +
+  coord_flip() +
+  labs(x = "", y = "Diametro de raíz", fill = "")
+
+########################
+
+group_by(datos_long[527:630,], Tratamiento, Tiempo) %>% 
+  summarise(mean_Alt = mean(DiamRaiz), .groups = "drop") %>% 
+  ggplot(aes(Tratamiento, mean_Alt, fill = Tiempo, label = round(mean_Alt,2))) +
+  geom_col(position = "dodge") +
+  geom_text(position = position_dodge(width = 0.9), vjust = -0.5) +
+  coord_flip() +
+  labs(x = "", y = "Diametro de raíz", fill = "")
+
+########################
+
+group_by(datos_long[37:140,], Tratamiento, Tiempo) %>% 
+  summarise(mean_Alt = mean(DiamRaiz), .groups = "drop") %>% 
+  ggplot(aes(Tratamiento, mean_Alt, fill = Tiempo, label = round(mean_Alt,2))) +
+  geom_col(position = "dodge") +
+  geom_text(position = position_dodge(width = 0.9), vjust = -0.5) +
+  coord_flip() +
+  labs(x = "", y = "Diametro de raíz", fill = "")
+########################
+group_by(datos_long[142:245,], Tratamiento, Tiempo) %>% 
+  summarise(mean_Alt = mean(DiamRaiz), .groups = "drop") %>% 
+  ggplot(aes(Tratamiento, mean_Alt, fill = Tiempo, label = round(mean_Alt,2))) +
+  geom_col(position = "dodge") +
+  geom_text(position = position_dodge(width = 0.9), vjust = -0.5) +
+  coord_flip() +
+  labs(x = "", y = "Diametro de raíz", fill = "")
+########################
+group_by(datos_long[247:350,], Tratamiento, Tiempo) %>% 
+  summarise(mean_Alt = mean(DiamRaiz), .groups = "drop") %>% 
+  ggplot(aes(Tratamiento, mean_Alt, fill = Tiempo, label = round(mean_Alt,2))) +
+  geom_col(position = "dodge") +
+  geom_text(position = position_dodge(width = 0.9), vjust = -0.5) +
+  coord_flip() +
+  labs(x = "", y = "Diametro de raíz", fill = "")
+```
+
+# Análisis longitudinal 
+## Altura de la planta. 
+### Interacción entre tiempo y grupo. 
+Responde a la pregunta: 
+¿El cambio de la respuesta media a lo largo del tiempo de la variable altura, varía según el grupo de individuos?
+```{r}
+lin_TiemTratInter <- lmer(Altura ~ Tiempo*Tratamiento + (1 | ID), data = datos_long)
+#summary(lin_TiemTratInter)
+```
+
+```{r}
+anova(lin_TiemTratInter)
+```
+El tiempo, los tratamientos y la interacción entre eellos son significativos, por lo tanto se mantiene el modelo y se procede a realizar la respectiva verificación de supuestos utilizando los residuales
+```{r}
+## Predicciones
+datos_fit <- bind_cols(
+  datos_long, pred_age = predict(lin_TiemTratInter, re.form = ~ 0)
+)
+datos_fit$pred_TiemTratInter <- predict(lin_TiemTratInter, re.form = ~ 0)
+```
+0
+```{r}
+res_Alt<-residuals(lin_TiemTratInter)
+### Pruebas
+lillie.test(res_Alt) # No se rechaza normalidad al 5% (p-value=0.3523)
+shapiro.test(res_Alt) # No se rechaza normalidad al 5% (pvalue=0.04649)
+
+# Test de homocedasticidad
+#grupos<-as.factor(rep(seq(1:18),each=5))
+bartlett.test(res_Alt,datos_long$Tratamiento,data=datos_long) #  se rechaza igualdad de varianzas al 5% de significancia (p-value=2.2e-16)
+
+```
+
+```{r}
+#### Graficos
+qqPlot(res_Alt,col="orange",xlab="Residuales",ylab="Altura")
+plot(res_Alt,col="orange",xlab="Residuales",ylab="Altura")
+```
+Las anteriore gráficas sustentan el hecho de la existencia de normalidad y además no se observan patrones de algun tipo en los residuales.
+
+
+
+```{r}
+ggplot(datos_fit, aes(Tiempo, Altura)) +
+  geom_line(aes(group = ID)) +
+  geom_point(aes(y = pred_TiemTratInter, col = Tratamiento), size = 2) + 
+  labs(x = "Tiempo", y = "Altura", col = "Tratamiento")
+```
+
+```{r}
+#View(datos_fit)
+resumen_alt<- unique(datos_fit[, c("Tratamiento", "Tiempo", "pred_TiemTratInter")])
+resumen_alt ## Preguntar como mejorar esta tabla resumen.
+
+```
+## Diametro del tallo. 
+### Interacción entre tiempo y grupo.
+```{r}
+lin_TiemTratInter_DT <- lmer(DiamTallo ~ Tiempo*Tratamiento + (1 | ID), data = datos_long)
+#summary(lin_TiemTratInter)
+```
+
+```{r}
+anova(lin_TiemTratInter_DT)
+```
+El tiempo, los tratamientos y la interacción entre eellos son significativos, por lo tanto se mantiene el modelo y se procede a realizar la respectiva verificación de supuestos utilizando los residuales
+```{r}
+## Predicciones
+datos_fit$pred_TiemTratInter_DT <- predict(lin_TiemTratInter_DT, re.form = ~ 0)
+```
+```{r}
+res_DiamTallo<-residuals(lin_TiemTratInter_DT)
+### Pruebas
+lillie.test(res_DiamTallo) #  se rechaza normalidad al 5% (p-value=0.0002079)
+shapiro.test(res_DiamTallo) # se rechaza normalidad al 5% (pvalue=9.479e-09)
+
+# Test de homocedasticidad
+#grupos<-as.factor(rep(seq(1:18),each=5))
+bartlett.test(res_DiamTallo,datos_long$Tratamiento,data=datos_long) #  se rechaza igualdad de varianzas al 5% de significancia (p-value=9.471e-13)
+
+```
+
+```{r}
+#### Graficos
+qqPlot(res_DiamTallo,col="orange",xlab="Residuales",ylab="Diámetro del tallo")
+plot(res_DiamTallo,col="orange",xlab="Residuales",ylab="Diámetro del tallo")
+```
+```{r}
+
+ggplot(datos_fit, aes(Tiempo, DiamTallo)) +
+  geom_line(aes(group = ID)) +
+  geom_point(aes(y = pred_TiemTratInter_DT, col = Tratamiento), size = 2) + 
+  labs(x = "Tiempo", y = "Diametro del tallo", col = "Tratamiento")
+```
+```{r}
+#View(datos_fit)
+resumen_DT<- unique(datos_fit[, c("Tratamiento", "Tiempo", "pred_TiemTratInter_DT")])
+resumen_DT ## Preguntar como mejorar esta tabla resumen.
+```
+## Número de Hojas. 
+### Interacción entre tiempo y grupo.
+```{r}
+lin_TiemTratInter_NH <- lmer(NumHojas ~ Tiempo*Tratamiento + (1 | ID), data = datos_long)
+#summary(lin_TiemTratInter)
+```
+
+```{r}
+anova(lin_TiemTratInter_NH)
+```
+El tiempo, los tratamientos y la interacción entre eellos son significativos, por lo tanto se mantiene el modelo y se procede a realizar la respectiva verificación de supuestos utilizando los residuales
+```{r}
+## Predicciones
+datos_fit$pred_TiemTratInter_NH <- predict(lin_TiemTratInter_NH, re.form = ~ 0)
+```
+```{r}
+res_NumHojas<-residuals(lin_TiemTratInter_NH)
+### Pruebas
+lillie.test(res_NumHojas) # No se rechaza normalidad al 5% (p-value=0.06617)
+shapiro.test(res_NumHojas) # No se rechaza normalidad al 5% (pvalue=2.534e-06)
+
+# Test de homocedasticidad
+#grupos<-as.factor(rep(seq(1:18),each=5))
+bartlett.test(res_NumHojas,datos_long$Tratamiento,data=datos_long) #  se rechaza igualdad de varianzas al 5% de significancia (p-value=3.105e-11)
+
+```
+
+```{r}
+#### Graficos
+qqPlot(res_NumHojas,col="orange",xlab="Residuales",ylab="Número de hojas")
+plot(res_NumHojas,col="orange",xlab="Residuales",ylab="Número de hojas")
+```
+```{r}
+#datos_fit$pred_TiemTratInter_DT <- predict(lin_TiemTratInter_DT, re.form = ~ 0)
+ggplot(datos_fit, aes(Tiempo, NumHojas)) +
+  geom_line(aes(group = ID)) +
+  geom_point(aes(y = pred_TiemTratInter_NH, col = Tratamiento), size = 2) + 
+  labs(x = "Tiempo", y = "Número de hojas", col = "Tratamiento")
+```
+```{r}
+#View(datos_fit)
+resumen_NH<- unique(datos_fit[, c("Tratamiento", "Tiempo", "pred_TiemTratInter_NH")])
+resumen_NH ## Preguntar como mejorar esta tabla resumen.
+```
+## Diametro de la raíz. 
+### Interacción entre tiempo y grupo.
+```{r}
+lin_TiemTratInter_DR <- lmer(DiamRaiz ~ Tiempo*Tratamiento + (1 | ID), data = datos_long)
+#summary(lin_TiemTratInter)
+```
+
+```{r}
+anova(lin_TiemTratInter_DR)
+```
+El tiempo, los tratamientos y la interacción entre eellos son significativos, por lo tanto se mantiene el modelo y se procede a realizar la respectiva verificación de supuestos utilizando los residuales
+```{r}
+## Predicciones
+datos_fit$pred_TiemTratInter_DR <- predict(lin_TiemTratInter_DR, re.form = ~ 0)
+```
+```{r}
+res_DiamRaiz<-residuals(lin_TiemTratInter_DR)
+### Pruebas
+lillie.test(res_DiamRaiz) # No se rechaza normalidad al 5% (p-value=0.0001644)
+shapiro.test(res_DiamRaiz) # No se rechaza normalidad al 5% (pvalue=4.503e-12)
+
+# Test de homocedasticidad
+#grupos<-as.factor(rep(seq(1:18),each=5))
+bartlett.test(res_DiamRaiz,datos_long$Tratamiento,data=datos_long) #  se rechaza igualdad de varianzas al 5% de significancia (p-value=2.188e-14)
+
+```
+
+```{r}
+#### Graficos
+qqPlot(res_DiamRaiz,col="orange",xlab="Residuales",ylab="Diámetro de la raíz")
+plot(res_DiamRaiz,col="orange",xlab="Residuales",ylab="Diámetro de la raíz")
+```
+```{r}
+#datos_fit$pred_TiemTratInter_DT <- predict(lin_TiemTratInter_DT, re.form = ~ 0)
+ggplot(datos_fit, aes(Tiempo, DiamRaiz)) +
+  geom_line(aes(group = ID)) +
+  geom_point(aes(y = pred_TiemTratInter_DR, col = Tratamiento), size = 2) + 
+  labs(x = "Tiempo", y = "Diametro de la raíz", col = "Tratamiento")
+```
+```{r}
+#View(datos_fit)
+resumen_DR<- unique(datos_fit[, c("Tratamiento", "Tiempo", "pred_TiemTratInter_DR")])
+resumen_DR ## Preguntar como mejorar esta tabla resumen.
+```
+
