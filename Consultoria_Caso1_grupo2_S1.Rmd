@@ -527,6 +527,7 @@ interaction.plot(datos$`Factor 2`,as.factor(rep("Hola",length(datos$`Factor 2`))
 ## Creando el modelo lineal para la variable área foliar
 mod_area<-glm(`Area foliar (cm2)`~`Factor 1`+`Factor 2`+`Factor 3`+`Factor 1`*`Factor 2`+`Factor 1`*`Factor 3`,data=datos,family=Gamma(log))
 AIC(mod_area)
+adjR2(mod_area)
 #residuals2(mod_area,type="quantile")
 #envelope(mod_area, type="quantile", rep=500)
 ```
@@ -583,8 +584,10 @@ residuos_ar2 <- residuals2(mod_area2,type="quantile")
 ### Modelo para la variable: biomasa seca total
 ```{r}
 ## Creando el modelo lineal para la variable área foliar
-mod_biom<-glm(`Biomasa seca total (g)`~`Factor 1`+`Factor 2`+`Factor 3`+`Factor 1`*`Factor 2`,data=datos,family=Gamma(log))
-AIC(mod_biom)
+mod_biom<-glm(log(`Biomasa seca total (g)`)~`Factor 1`*`Factor 2`,data=datos)
+AIC(mod_biom)+2*sum(log(datos$`Biomasa seca total (g)`))
+BIC(mod_biom)+2*sum(log(datos$`Biomasa seca total (g)`))
+adjR2(mod_biom)
 ```
 
 
@@ -600,12 +603,70 @@ envelope(mod_biom)
 
 ```{r}
 summary(mod_biom)
-#anova(mod_biom)
 ```
 
 ```{r}
 cdi2 <- cooks.distance(mod_biom)
 plot(cdi2, type="h", xlab="Observation Index", ylab="Cook’s Distance")
+```
+
+```{r}
+mod_biom2<-update(mod_biom, subset=-c(4, 32))
+summary(mod_biom2)
+```
+```{r}
+residuals2(mod_biom2,type="quantile")
+```
+
+### Colonización
+```{r}
+col1 <- read_excel("C:/Users/jaime/Downloads/MATRIZ DE DATOS FINAL (1).xlsx", sheet = "Destructivo #1",col_names=T,range=cell_cols("K"))/100
+col1[44,]<-0.0001
+col1[48,]<-0.999
+col1<-cbind(datos$`Factor 1`,datos$`Factor 2`,datos$`Factor 3`,datos$`Tratamientos (dia 120)`,col1)
+names(col1)<-c("Factor 1","Factor 2","Factor 3","Tratamientos","% Colonizacion")
+col2 <- read_excel("C:/Users/jaime/Downloads/MATRIZ DE DATOS FINAL (1).xlsx", sheet = "Destructivo #2",col_names=T,range=cell_cols("K"))/100
+col2<-cbind(datos$`Factor 1`,datos$`Factor 2`,datos$`Factor 3`,datos$`Tratamientos (dia 120)`,col2)
+names(col2)<-names(col1)
+col3<-as.data.frame(datos$`Porcentaje de colonización (dia 120)`)
+col3<-cbind(datos$`Factor 1`,datos$`Factor 2`,datos$`Factor 3`,datos$`Tratamientos (dia 120)`,col3)
+names(col3)<-names(col1)
+```
+
+```{r}
+col_t<-rbind(col1,col2,col3)
+col_t$Tratamientos<-as.factor(col_t$Tratamientos)
+col_t2<-col_t[order(col_t$Tratamientos),]
+```
+
+
+```{r}
+mod_col<-betareg(`% Colonizacion`~`Factor 1`*`Factor 2`*`Factor 3`,data=col3,link="logit",link.phi = "identity")
+summary(mod_col)
+```
+```{r}
+plot(fitted(mod_col),residuals(mod_col),pch=19,xlab="Fitted values",ylab="Residuals")
+```
+
+## Modelo para la variable presencia In Situ
+
+
+
+```{r}
+mod_situ<-glm(`Presencia In situ solubilizadores (UFC g/suelo seco)`~`Factor 1`*`Factor 2`*`Factor 3`,family = poisson(log),data=datos)
+```
+
+```{r}
+adjR2(mod_situ)
+```
+
+```{r}
+summary(mod_situ)
+```
+
+
+```{r}
+plot(fitted(mod_situ),(residuals(mod_situ)-mean(residuals(mod_situ)))/sd(residuals(mod_situ)),pch=19,xlab="Fitted values",ylab="Residuals")
 ```
 
 
